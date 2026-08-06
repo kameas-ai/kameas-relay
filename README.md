@@ -228,7 +228,11 @@ test suite runs against in-memory state with an injected clock.
 
 ## License
 
-**LICENSE-TBD** — no license file yet, deliberately. §XII condition 7 requires
-this repo to be public at first push, which makes the license choice an
-operator decision, not an implementer default. **Operator: pick a license
-before the first push.**
+**Apache-2.0** — see [LICENSE](LICENSE). Operator decision, 2026-08-06.
+
+This repository is public by constitutional requirement, not by preference:
+[§XII condition 7](../workspace/.specify/memory/constitution.md) obliges the
+relay's source to be public and auditable, because the privacy claim this
+service makes — that it *cannot* read what it forwards — is only credible if
+anyone can check it. Read `internal/fakerelay/denylist_test.go` first: it is
+the structural proof that no relay package imports a crypto library.
