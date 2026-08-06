@@ -1,0 +1,8 @@
+.git
+.github
+.worktrees
+bin
+Dockerfile
+.dockerignore
+*.md
+!README.md

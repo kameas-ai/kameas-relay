@@ -1,0 +1,39 @@
+version: 2
+
+updates:
+  # The dependency set is deliberately tiny (see README "Dependency choice"):
+  # github.com/coder/websocket with zero transitive deps, plus
+  # golang.org/x/crypto for the endpoint instruments only. Keeping it patched
+  # is cheap and the deny-list test is what keeps it honest — a bump that
+  # somehow pulled crypto into a relay package would fail CI.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(docker)"

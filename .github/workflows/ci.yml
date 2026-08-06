@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The suites are WebSocket- and race-detector-heavy; bounded package
+  # parallelism keeps the runner's file-descriptor table out of trouble.
+  GOFLAGS: -mod=readonly
+
+jobs:
+  check:
+    name: check (gofmt + vet + race tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: go build
+        run: go build ./...
+
+      # `make check` runs gofmt -l (failing on any output), go vet, and
+      # `go test -race ./...`. That race suite carries BOTH halves of the
+      # §XII condition-2 proof — the import deny-list (structural) and the
+      # SC-2 no-plaintext property test (behavioural). Neither is a separate
+      # optional job on purpose: a red SC-2 must fail the default gate.
+      - name: make check
+        run: make check
+
+  demo:
+    name: smoke (remotectl demo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      # The one-command end-to-end exit gate: in-process relay + fake host,
+      # a fresh pairing, snapshot + live events, and the approval round-trip.
+      # It exits non-zero on any failure and prints PASS on success.
+      - name: remotectl demo
+        run: go run ./cmd/remotectl demo -timeout 90s
