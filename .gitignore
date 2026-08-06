@@ -1,0 +1,23 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+
+# Go workspace files (this repo builds standalone)
+go.work
+go.work.sum
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
