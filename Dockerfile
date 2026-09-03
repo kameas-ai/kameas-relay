@@ -6,7 +6,7 @@
 # no package manager, no busybox, no libsodium, nothing that could grow one.
 
 # ---- build ----------------------------------------------------------------
-FROM golang:1.25-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 WORKDIR /src
 
