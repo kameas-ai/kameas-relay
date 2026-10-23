@@ -162,6 +162,7 @@ jobs:
         with:
           name: govulncheck-results
           path: .vuln-gate/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 30
 
