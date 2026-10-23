@@ -28,8 +28,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          # Pinned to the go.mod `toolchain` line (CVE-2026-111943 fix);
+          # setup-go@v5 does not read `toolchain`. Bump both together.
+          go-version: "1.27.3"
           cache: true
 
       - name: go build
@@ -52,8 +53,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          # Pinned to the go.mod `toolchain` line (CVE-2026-111943 fix);
+          # setup-go@v5 does not read `toolchain`. Bump both together.
+          go-version: "1.27.3"
           cache: true
 
       # The one-command end-to-end exit gate: in-process relay + fake host,
@@ -61,6 +63,107 @@ jobs:
       # It exits non-zero on any failure and prints PASS on success.
       - name: remotectl demo
         run: go run ./cmd/remotectl demo -timeout 90s
+
+  # Vulnerability gate (security baseline 2026-10-22, WS1/WS4). Inline copy of
+  # the govulncheck job from the WS4 template workspace/docs/ci-templates/
+  # vuln-gate.yml; switch to the org reusable workflow once it lands in
+  # kameas-ai/.github. BLOCKS only on findings that are reachable from our code
+  # ("called") AND have a fixed version; imported-only / no-fix findings are
+  # listed in the job summary. Stdlib findings count: the fix is a toolchain
+  # bump. Go is pinned explicitly to the go.mod `toolchain` line; bump both
+  # together (setup-go@v5 in the other jobs does not read `toolchain`).
+  # Runs on ubuntu-latest like every other job in this repo. Not a required
+  # check yet: add `govulncheck` to branch protection once it is green on main.
+  # GOFLAGS is overridden to -mod=mod here (workflow default is -mod=readonly)
+  # because govulncheck may need to resolve test-only module metadata.
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GOVULNCHECK_VERSION: v1.9.0
+      GOFLAGS: -mod=mod
+      GO_MODULES: "."
+      # Space-separated GO-YYYY-NNNN IDs accepted as risk; each needs a dated
+      # justification in this file. Empty today.
+      ALLOW: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: false
+      - name: Install govulncheck
+        run: |
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Run govulncheck per module
+        run: |
+          set -euo pipefail
+          mkdir -p .vuln-gate
+          echo "Go $(go env GOVERSION); govulncheck ${GOVULNCHECK_VERSION}"
+          status=0
+          for m in $GO_MODULES; do
+            out=".vuln-gate/govulncheck-$(echo "$m" | sed 's#^\./##; s#/#__#g; s#^\.$#root#').json"
+            echo "::group::govulncheck $m"
+            # -format json exits 0 on findings; non-zero means the scan itself
+            # failed (build error, network), which must not pass silently.
+            if ! govulncheck -C "$m" -format json ./... > "$out"; then
+              echo "::error::govulncheck failed to scan $m"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $status
+      - name: Evaluate findings
+        run: |
+          set -euo pipefail
+          allow_json=$(printf '%s\n' $ALLOW | jq -R . | jq -sc 'map(select(length>0))')
+          blocking=0
+          {
+            echo "## govulncheck"
+            echo
+            echo "| Module | ID | Level | Fixed in | Package | Status |"
+            echo "|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for f in .vuln-gate/govulncheck-*.json; do
+            mod=$(basename "$f" .json | sed 's/^govulncheck-//')
+            rows=$(jq -sc --argjson allow "$allow_json" '
+              [ .[] | select(.finding) | .finding
+                | { id: .osv,
+                    fixed: (.fixed_version // ""),
+                    pkg: (.trace[0].package // .trace[0].module // ""),
+                    level: (if (.trace[0].function // "") != "" then "called"
+                            elif (.trace[0].package // "") != "" then "imported"
+                            else "required" end) } ]
+              | group_by(.id)
+              | map( (map(select(.level=="called")) | first) // first )
+              | map(. + { allowed: (.id as $i | $allow | index($i) != null) })
+              | map(. + { blocks: (.level=="called" and .fixed != "" and (.allowed|not)) })
+            ' "$f")
+            echo "$rows" | jq -r --arg m "$mod" '.[] |
+              "| \($m) | \(.id) | \(.level) | \(if .fixed=="" then "no fix" else .fixed end) | \(.pkg) | \(if .blocks then "**BLOCKING**" elif .allowed then "accepted risk" else "report" end) |"' \
+              >> "$GITHUB_STEP_SUMMARY"
+            n=$(echo "$rows" | jq '[.[] | select(.blocks)] | length')
+            if [ "$n" -gt 0 ]; then
+              echo "$rows" | jq -r --arg m "$mod" '.[] | select(.blocks) |
+                "::error title=govulncheck \(.id)::\($m): reachable vulnerability \(.id) in \(.pkg); fixed in \(.fixed)"'
+              blocking=$((blocking + n))
+            fi
+          done
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Blocking findings: $blocking" >> "$GITHUB_STEP_SUMMARY"
+          [ "$blocking" -eq 0 ]
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: govulncheck-results
+          path: .vuln-gate/
+          if-no-files-found: ignore
+          retention-days: 30
 
   docker:
     name: docker build
